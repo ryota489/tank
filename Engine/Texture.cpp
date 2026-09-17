@@ -1,6 +1,7 @@
 #include "Texture.h"
 #include "Direct3D.h"
 #include "Global.h"
+#include <vector>
 
 Texture::Texture():
 	pSampleLinear_(nullptr), pTextureSRV_(nullptr), size_(XMFLOAT3(0,0,0))
@@ -61,9 +62,74 @@ HRESULT Texture::Load(std::string fileName)
 	Direct3D::pDevice_->CreateTexture2D(&texdec, NULL, &pTexture);
 
 	// テクスチャを送る
-	D3D11_MAPPED_SUBRESOURCE hMappedres;
-	Direct3D::pContext_->Map(pTexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &hMappedres);
-	pFormatConverter->CopyPixels(NULL, imgWidth * 4, imgWidth * imgHeight * 4, (BYTE*)hMappedres.pData);
+	std::vector<BYTE> imageData(imgWidth * imgHeight * 4);
+
+	HRESULT hrCopy = pFormatConverter->CopyPixels(
+		NULL,
+		imgWidth * 4,
+		imgWidth * imgHeight * 4,
+		imageData.data()
+	);
+
+	if (FAILED(hrCopy))
+	{
+		MessageBoxA(
+			nullptr,
+			"画像データの取得に失敗しました",
+			"Texture Error",
+			MB_OK
+		);
+
+		pTexture->Release();
+		pFormatConverter->Release();
+		pFrame->Release();
+		pDecoder->Release();
+		pFactory->Release();
+
+		return hrCopy;
+	}
+
+	// GPUテクスチャをMap
+	D3D11_MAPPED_SUBRESOURCE hMappedres = {};
+
+	HRESULT hrMap = Direct3D::pContext_->Map(
+		pTexture,
+		0,
+		D3D11_MAP_WRITE_DISCARD,
+		0,
+		&hMappedres
+	);
+
+	if (FAILED(hrMap))
+	{
+		MessageBoxA(
+			nullptr,
+			"Texture Mapに失敗しました",
+			"Texture Error",
+			MB_OK
+		);
+
+		pTexture->Release();
+		pFormatConverter->Release();
+		pFrame->Release();
+		pDecoder->Release();
+		pFactory->Release();
+
+		return hrMap;
+	}
+
+	// RowPitchを考慮して1行ずつコピー
+	BYTE* dest = static_cast<BYTE*>(hMappedres.pData);
+
+	for (UINT y = 0; y < imgHeight; y++)
+	{
+		memcpy(
+			dest + y * hMappedres.RowPitch,
+			imageData.data() + y * imgWidth * 4,
+			imgWidth * 4
+		);
+	}
+
 	Direct3D::pContext_->Unmap(pTexture, 0);
 
 
